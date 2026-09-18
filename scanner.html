@@ -2,109 +2,165 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>📷 Universal Barcode Scanner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="description" content="A private, accessible multi-format barcode scanner that runs in your browser." />
+  <meta name="theme-color" content="#09090b" />
+  <title>Universal Barcode Scanner</title>
+  <style>
+    :root { color-scheme: dark; --bg: #09090b; --panel: #18181b; --border: #3f3f46; --muted: #a1a1aa; --accent: #a3e635; --danger: #f87171; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; padding: 1.25rem; display: grid; place-items: center; background: var(--bg); color: #fafafa; font: 16px/1.5 system-ui, sans-serif; }
+    main { width: min(100%, 42rem); }
+    header { text-align: center; margin-bottom: 1rem; }
+    h1 { margin: 0; color: var(--accent); font-size: clamp(1.7rem, 5vw, 2.35rem); }
+    .subtitle, .privacy { color: var(--muted); margin: .35rem 0 0; }
+    .privacy { font-size: .82rem; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 1rem; padding: 1rem; box-shadow: 0 12px 30px #0005; }
+    .viewer { position: relative; overflow: hidden; aspect-ratio: 4 / 3; background: #000; border-radius: .75rem; border: 2px solid #65a30d; }
+    video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .scan-frame { position: absolute; inset: 18% 10%; border: 2px solid var(--accent); border-radius: .5rem; box-shadow: 0 0 0 999px #0004; pointer-events: none; }
+    .scan-frame::after { content: ''; position: absolute; left: 4%; right: 4%; top: 50%; height: 2px; background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: scan 2s ease-in-out infinite; }
+    @keyframes scan { 0%, 100% { transform: translateY(-2.5rem); opacity: .35; } 50% { transform: translateY(2.5rem); opacity: 1; } }
+    .status { min-height: 3.25rem; display: grid; place-items: center; text-align: center; margin: .85rem 0; padding: .65rem; color: #d9f99d; overflow-wrap: anywhere; }
+    .status.error { color: var(--danger); }
+    .controls, .secondary-controls { display: flex; flex-wrap: wrap; gap: .65rem; align-items: center; justify-content: center; }
+    button, select, .file-label { min-height: 2.75rem; border: 1px solid var(--border); border-radius: .55rem; padding: .55rem .85rem; color: #fff; background: #27272a; font: inherit; cursor: pointer; }
+    button:hover, select:hover, .file-label:hover { border-color: var(--accent); }
+    button:focus-visible, select:focus-visible, .file-label:focus-within { outline: 3px solid #bef264; outline-offset: 2px; }
+    .primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 700; }
+    .danger { background: #7f1d1d; border-color: #ef4444; }
+    .hidden, input[type=file] { display: none; }
+    .camera-row { display: flex; gap: .65rem; align-items: center; margin: .85rem 0 0; }
+    select { flex: 1; min-width: 0; }
+    .result-card { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+    .result-card h2, .history h2 { font-size: 1rem; margin: 0 0 .5rem; }
+    #resultText { white-space: pre-wrap; overflow-wrap: anywhere; color: #e4e4e7; }
+    .result-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+    .history { margin-top: 1rem; }
+    #historyList { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
+    #historyList button { width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .empty { color: var(--muted); font-size: .9rem; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+  </style>
 </head>
-<body class="bg-zinc-900 text-white min-h-screen flex flex-col justify-center items-center p-4">
+<body>
+  <main>
+    <header>
+      <h1>📷 Universal Barcode Scanner</h1>
+      <p class="subtitle">QR, PDF417, Data Matrix, UPC, Code 128, and more</p>
+      <p class="privacy">Private by design: scanning happens locally in your browser.</p>
+    </header>
 
-  <!-- Header -->
-  <header class="text-center mb-4">
-    <h1 class="text-3xl font-bold text-lime-400">📷 Universal Barcode Scanner</h1>
-    <p class="text-sm text-gray-400 mt-1">Supports QR, PDF417, UPC, Code128, and more</p>
-  </header>
+    <section class="panel" aria-labelledby="scanner-heading">
+      <h2 id="scanner-heading" class="sr-only">Barcode scanner</h2>
+      <div class="viewer">
+        <video id="video" autoplay muted playsinline aria-label="Live camera preview"></video>
+        <div class="scan-frame" aria-hidden="true"></div>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite">Ready to scan.</p>
 
-  <!-- Video Feed -->
-  <div class="w-full max-w-md aspect-video bg-black rounded-xl border border-lime-500 overflow-hidden">
-    <video id="video" class="w-full h-full" autoplay muted playsinline></video>
-  </div>
+      <div class="controls">
+        <button id="startBtn" class="primary" type="button">▶ Start scanner</button>
+        <button id="stopBtn" class="danger hidden" type="button">⏹ Stop</button>
+        <button id="torchBtn" type="button" class="hidden" aria-pressed="false">🔦 Torch</button>
+      </div>
 
-  <!-- Scan Result -->
-  <div id="output" class="mt-4 text-center text-lime-300 text-sm font-mono break-all">
-    Awaiting scan...
-  </div>
+      <div class="camera-row">
+        <label for="cameraSelect">Camera:</label>
+        <select id="cameraSelect" aria-label="Select camera" disabled>
+          <option>Start the scanner to choose a camera</option>
+        </select>
+      </div>
 
-  <!-- Buttons -->
-  <div class="mt-4 flex gap-4">
-    <button id="startBtn"
-      class="px-5 py-2 bg-lime-500 text-black font-bold rounded-lg hover:bg-lime-400 transition">
-      ▶️ Start Scanner
-    </button>
-    <button id="stopBtn"
-      class="px-5 py-2 bg-red-500 text-white font-bold rounded-lg hover:bg-red-400 transition hidden">
-      ⏹ Stop
-    </button>
-  </div>
+      <div class="secondary-controls" style="margin-top:.85rem">
+        <label class="file-label" for="imageInput">🖼 Scan an image</label>
+        <input id="imageInput" type="file" accept="image/*" />
+        <button id="clearBtn" type="button">Clear result</button>
+      </div>
 
-  <!-- ZXing Script -->
+      <div id="resultCard" class="result-card hidden" aria-labelledby="result-heading">
+        <h2 id="result-heading">Latest result <span id="format" class="subtitle"></span></h2>
+        <div id="resultText"></div>
+        <div class="result-actions">
+          <button id="copyBtn" type="button">📋 Copy</button>
+          <a id="openLink" class="file-label hidden" target="_blank" rel="noopener noreferrer">🔗 Open link</a>
+        </div>
+      </div>
+
+      <div class="history" aria-labelledby="history-heading">
+        <h2 id="history-heading">Recent scans <button id="clearHistoryBtn" type="button">Clear history</button></h2>
+        <ul id="historyList"><li class="empty">No scans yet. History stays on this device.</li></ul>
+      </div>
+    </section>
+  </main>
+
   <script type="module">
-    import {
-      BrowserMultiFormatReader,
-      BarcodeFormat,
-      DecodeHintType,
-      NotFoundException
-    } from 'https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/+esm';
+    import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType, NotFoundException } from
+      'https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/+esm';
 
-    const video = document.getElementById('video');
-    const output = document.getElementById('output');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
+    const $ = (id) => document.getElementById(id);
+    const video = $('video'), status = $('status'), startBtn = $('startBtn'), stopBtn = $('stopBtn');
+    const cameraSelect = $('cameraSelect'), torchBtn = $('torchBtn'), imageInput = $('imageInput');
+    const resultCard = $('resultCard'), resultText = $('resultText'), format = $('format');
+    const openLink = $('openLink'), historyList = $('historyList');
+    const STORAGE_KEY = 'universal-barcode-scanner-history-v1';
+    const hints = new Map([[DecodeHintType.POSSIBLE_FORMATS, [
+      BarcodeFormat.QR_CODE, BarcodeFormat.PDF_417, BarcodeFormat.DATA_MATRIX, BarcodeFormat.AZTEC,
+      BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93, BarcodeFormat.EAN_13,
+      BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.ITF,
+    ]]]);
+    const reader = new BrowserMultiFormatReader(hints);
+    let devices = [], scanning = false, streamTrack = null;
 
-    const hints = new Map();
-    hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-      BarcodeFormat.QR_CODE,
-      BarcodeFormat.PDF_417,
-      BarcodeFormat.DATA_MATRIX,
-      BarcodeFormat.AZTEC,
-      BarcodeFormat.CODE_128,
-      BarcodeFormat.CODE_39,
-      BarcodeFormat.EAN_13,
-      BarcodeFormat.EAN_8,
-      BarcodeFormat.UPC_A,
-      BarcodeFormat.UPC_E,
-      BarcodeFormat.ITF,
-    ]);
-
-    const codeReader = new BrowserMultiFormatReader(hints);
-
-    let scanning = false;
-
-    startBtn.onclick = async () => {
-      output.textContent = "🔍 Scanning...";
-      startBtn.classList.add("hidden");
-      stopBtn.classList.remove("hidden");
-      scanning = true;
-
-      const devices = await codeReader.listVideoInputDevices();
-      const deviceId = devices?.[0]?.deviceId;
-
-      if (!deviceId) {
-        output.textContent = "❌ No camera found.";
-        return;
-      }
-
-      codeReader.decodeFromVideoDevice(deviceId, video, (result, err) => {
-        if (result) {
-          output.textContent = `✅ Detected: ${result.getText()}`;
-          navigator.vibrate?.(200);
-          codeReader.reset();
-          scanning = false;
-          startBtn.classList.remove("hidden");
-          stopBtn.classList.add("hidden");
-        } else if (err && !(err instanceof NotFoundException)) {
-          output.textContent = `⚠️ Error: ${err}`;
-        }
-      });
+    const setStatus = (message, error = false) => { status.textContent = message; status.classList.toggle('error', error); };
+    const setButtons = (active) => { startBtn.classList.toggle('hidden', active); stopBtn.classList.toggle('hidden', !active); };
+    const safeHistory = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; } };
+    const renderHistory = () => {
+      const items = safeHistory(); historyList.innerHTML = '';
+      if (!items.length) { historyList.innerHTML = '<li class="empty">No scans yet. History stays on this device.</li>'; return; }
+      items.forEach((item) => { const li = document.createElement('li'); const button = document.createElement('button');
+        button.type = 'button'; button.textContent = `${item.format || 'Barcode'}: ${item.text}`; button.title = item.text;
+        button.onclick = () => showResult({ getText: () => item.text, getBarcodeFormat: () => item.format }); li.append(button); historyList.append(li); });
+    };
+    const showResult = (result) => {
+      const text = result.getText(); if (!text) return;
+      resultText.textContent = text; format.textContent = result.getBarcodeFormat ? `(${result.getBarcodeFormat()})` : '';
+      resultCard.classList.remove('hidden'); setStatus('✅ Barcode detected.'); navigator.vibrate?.(120);
+      openLink.classList.add('hidden');
+      try { const url = new URL(text); if (['http:', 'https:'].includes(url.protocol)) { openLink.href = url.href; openLink.classList.remove('hidden'); } } catch { /* Not a URL. */ }
+      const items = [{ text, format: result.getBarcodeFormat?.() || 'Barcode', time: Date.now() }, ...safeHistory().filter((item) => item.text !== text)].slice(0, 10);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch { /* Storage is optional. */ } renderHistory();
+    };
+    const stop = (message = 'Scanner stopped.') => { reader.reset(); streamTrack?.stop(); streamTrack = null; scanning = false; torchBtn.classList.add('hidden'); setButtons(false); setStatus(message); };
+    const populateCameras = async () => {
+      devices = await reader.listVideoInputDevices(); cameraSelect.innerHTML = '';
+      devices.forEach((device, index) => { const option = document.createElement('option'); option.value = device.deviceId; option.textContent = device.label || `Camera ${index + 1}`; cameraSelect.append(option); });
+      cameraSelect.disabled = !devices.length;
+    };
+    const start = async () => {
+      if (!window.isSecureContext && location.hostname !== 'localhost') return setStatus('🔒 Camera access requires HTTPS or localhost.', true);
+      try {
+        setStatus('🔍 Starting camera…'); setButtons(true); await populateCameras();
+        if (!devices.length) throw new Error('No camera found.');
+        await reader.decodeFromVideoDevice(cameraSelect.value || devices[0].deviceId, video, (result, error) => {
+          if (result && scanning) { showResult(result); stop('✅ Scan complete. Ready for another scan.'); }
+          else if (error && !(error instanceof NotFoundException)) console.warn('Scanner:', error);
+        });
+        scanning = true; streamTrack = video.srcObject?.getVideoTracks?.()[0] || null;
+        const capabilities = streamTrack?.getCapabilities?.(); torchBtn.classList.toggle('hidden', !capabilities?.torch);
+        setStatus('🔍 Scanning… Point the camera at a barcode.');
+      } catch (error) { console.error(error); stop(`❌ ${error.message || 'Unable to access the camera.'}`); }
     };
 
-    stopBtn.onclick = () => {
-      codeReader.reset();
-      scanning = false;
-      output.textContent = "⏹ Scanner stopped.";
-      startBtn.classList.remove("hidden");
-      stopBtn.classList.add("hidden");
-    };
+    startBtn.onclick = start; stopBtn.onclick = () => stop();
+    cameraSelect.onchange = () => { if (scanning) { stop('Switching camera…'); start(); } };
+    torchBtn.onclick = async () => { if (!streamTrack) return; const enabled = torchBtn.getAttribute('aria-pressed') !== 'true'; try { await streamTrack.applyConstraints({ advanced: [{ torch: enabled }] }); torchBtn.setAttribute('aria-pressed', String(enabled)); } catch { setStatus('Torch is not available on this camera.', true); } };
+    imageInput.onchange = async () => { const file = imageInput.files?.[0]; if (!file) return; try { setStatus('🔍 Reading image…'); const url = URL.createObjectURL(file); const result = await reader.decodeFromImageUrl(url); URL.revokeObjectURL(url); showResult(result); } catch { setStatus('⚠️ No barcode could be found in that image.', true); } finally { imageInput.value = ''; } };
+    $('copyBtn').onclick = async () => { try { await navigator.clipboard.writeText(resultText.textContent); setStatus('✅ Result copied to clipboard.'); } catch { setStatus('Clipboard access was unavailable.', true); } };
+    $('clearBtn').onclick = () => { resultCard.classList.add('hidden'); setStatus(scanning ? '🔍 Scanning…' : 'Ready to scan.'); };
+    $('clearHistoryBtn').onclick = () => { localStorage.removeItem(STORAGE_KEY); renderHistory(); };
+    window.addEventListener('pagehide', () => reader.reset()); renderHistory();
   </script>
-
 </body>
 </html>
